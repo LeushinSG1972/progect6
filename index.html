@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Модель</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
+    
+    <script>
+        // Инициализация сцены, камеры и рендерера
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(0xf0f0f0);
+        document.body.appendChild(renderer.domElement);
+        
+        // Добавление освещения
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(1, 1, 1);
+        scene.add(directionalLight);
+        
+        // Добавление OrbitControls
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        camera.position.set(10, 10, 10);
+        controls.update();
+
+        // Словарь для хранения объектов
+        const objects = {};
+
+        // Функция для создания процедурной текстуры
+        function createProceduralTexture(width, height, patternType) {
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const context = canvas.getContext('2d');
+            
+            // Цветовые палитры
+            const palettes = [
+                ['#FF4136', '#2ECC40', '#0074D9', '#FFDC00'],
+                ['#001f3f', '#85144b', '#3D9970', '#FF851B'],
+                ['#F012BE', '#B10DC9', '#111111', '#AAAAAA'],
+                ['#39CCCC', '#01FF70', '#FFDC00', '#FF851B'],
+                ['#4B0082', '#9400D3', '#008000', '#FF0000']
+            ];
+            
+            const palette = palettes[patternType % palettes.length];
+            
+            // Типы текстур
+            switch(patternType % 6) {
+                case 0: // Полосы
+                    const stripeWidth = width / (5 + patternType % 5);
+                    for (let i = 0; i < width; i++) {
+                        const colorIndex = Math.floor(i / stripeWidth) % palette.length;
+                        context.fillStyle = palette[colorIndex];
+                        context.fillRect(i, 0, 1, height);
+                    }
+                    break;
+                    
+                case 1: // Шахматная доска
+                    const tileSize = width / (20+ patternType % 4);
+                    for (let x = 0; x < width; x++) {
+                        for (let y = 0; y < height; y++) {
+                            const tileX = Math.floor(x / tileSize);
+                            const tileY = Math.floor(y / tileSize);
+                            context.fillStyle = palette[(tileX + tileY) % palette.length];
+                            context.fillRect(x, y, 1, 1);
+                        }
+                    }
+                    break;
+                    
+                // ... (остальные case остаются без изменений)
+            }
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(2, 2);
+            
+            return texture;
+        }
+        
+        // Функция создания процедурного материала
+        function mm(nn) {
+            const texture = createProceduralTexture(512, 512, nn);
+            return new THREE.MeshStandardMaterial({ 
+                map: texture,
+                roughness: 0.7,
+                metalness: 0.1,
+                side: THREE.DoubleSide
+            });
+        }
+        function rm() {
+  // 1. Базовый цвет ржавчины (оранжево-коричневый)
+  const rustyColor = new THREE.Color(0.7, 0.3, 0.1);
+  
+  // 2. Шум для текстурных вариаций
+  const noiseGen = new ImprovedNoise();
+  const noiseTexture = new THREE.DataTexture(
+    new Uint8Array(256 * 256 * 4),
+    256,
+    256,
+    THREE.RGBAFormat
+  );
+  
+  // Генерация шума
+  for (let y = 0; y < 256; y++) {
+    for (let x = 0; x < 256; x++) {
+      const value = noiseGen.noise(x / 30, y / 30, 0) * 0.5 + 0.5;
+      const idx = (y * 256 + x) * 4;
+      noiseTexture.image.data[idx] = value * 255;
+      noiseTexture.image.data[idx + 1] = value * 200;
+      noiseTexture.image.data[idx + 2] = value * 150;
+      noiseTexture.image.data[idx + 3] = 255;
+    }
+  }
+  noiseTexture.needsUpdate = true;
+
+  // 3. Создание материала с комбинированными свойствами
+  const material = new THREE.MeshStandardMaterial({
+    color: rustyColor,
+    metalness: 0.7,  // Металличность (ржавчина её снижает)
+    roughness: 0.8,  // Шероховатость для ржавых участков
+    normalMap: noiseTexture,  // Карта неровностей
+    normalScale: new THREE.Vector2(0.3, 0.3),
+    aoMapIntensity: 0.5,
+    envMapIntensity: 0.2
+  });
+
+  // 4. Добавляем эффект "слоёв" ржавчины (опционально)
+  material.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <output_fragment>',
+      `
+      // Добавляем пятна ржавчины через шум
+      float rustPattern = smoothstep(0.3, 0.7, noiseGen.noise(vUv.x * 10.0, vUv.y * 10.0, 0.0));
+      vec3 finalColor = mix(baseColor.rgb, vec3(0.7, 0.3, 0.1), rustPattern * 0.5);
+      
+      // Уменьшаем металличность на ржавых участках
+      float finalMetalness = mix(metalness, 0.2, rustPattern);
+      
+      gl_FragColor = vec4(finalColor, diffuseColor.a);
+      `
+    );
+  };
+
+  return material;
+}
+        // Функция создания параллелепипеда
+        function pr(a, b, c, mat) {
+            const geometry = new THREE.BoxGeometry(a, b, c);
+            const materials = mat ? 
+                [mat, mat, mat, mat, mat, mat] : 
+                [mm(0), mm(1), mm(2), mm(3), mm(4), mm(5)];
+            return new THREE.Mesh(geometry, materials);
+        }
+        
+        // Функция создания цилиндра
+        function ps(d1, d2, kk, r, mat) {
+            const geometry = new THREE.CylinderGeometry(
+                d1 / 2, d2 / 2, kk, r || 32, 1, false);
+            const material = mat || mm(Math.floor(Math.random() * 10));
+            return new THREE.Mesh(geometry, material);
+        }
+        
+        // Функция размещения объекта в сцене
+        function rr(x, y, z, a1, a2, a3, mat) {
+            const obj = pr(a1, a2, a3, mat);
+            obj.position.set(x, y, z);
+            scene.add(obj);
+            return obj;
+        }
+        
+        // Новая функция размещения с использованием существующего объекта
+        function pp(rr, x1, x2, x3, a1, a2, a3, vv) {
+            if (!rr) {
+                rr = pr(a1, a2, a3);
+            }
+            
+            rr.position.set(x1, x2, x3);  rr.rotation.set(a1, a2, a3);
+            rr.visible = vv !== 0;
+            
+            if (!scene.children.includes(rr)) {
+                scene.add(rr);
+            }
+            
+            return rr;
+        }
+        
+        // Пример использования
+var b1 = rr(0, 0, -2, 2, 7, 0.5, mm(1));
+var b2 = rr(0, 0, 2, 2, 7, 0.5, mm(1));
+var c1 = ps(0.5, 0.5, 5, 16, mm(1));
+pp(c1,0,2.5,0,3.14/2,0,0,1);
+var b3 = rr(0, 0, 0, 15,3, 0.6, mm(1));
+var b4= rr(0, -3.5, 0, 35,0.2,7, mm(1));
+var b5= rr(7.5, 0, 0, 0.2,5,0.2, mm(1));
+ b3.add(b5);
+var b6= rr(-7.5, 0, 0, 0.2,5,0.2, mm(1));
+ b3.add(b6);
+ var b7= rr(4.25, 0, 0, 8.5,3,0.6, mm(1));
+ b5.add(b7);
+  var b8= rr(-4.25, 0, 0, 8.5,3,0.6, mm(1));
+ b6.add(b8);
+ var b9= rr(15.5, -0.6, 0, 0.5,5.5,7, mm(1));
+var b10= rr(-15.5, -0.6, 0, 0.5,5.5,7, mm(1));
+
+ var b11= rr(4, 0, -0.39,0.2,3,1.5, mm(1));
+ b7.add(b11);
+  var b12= rr(-4, 0, -0.39,0.2,3,1.5, mm(1));
+ b8.add(b12);
+   var b13= rr(-3, 0, -0.79,1,3,1, mm(0));
+ b7.add(b13);
+   var b14= rr(-7.5, 0, -0.79,1,3,1, mm(0));
+ b6.add(b14);
+
+
+ c1.add(b3);
+
+    
+        // Анимация
+var tt=0;
+        function animate() {
+            requestAnimationFrame(animate);
+    tt+=0.02;if(tt>6.28)tt=0;
+    pp(c1,0,2.5,0,3.14/2,Math.sin(tt)/3,0,1);    
+    if(Math.sin(tt)/2<0.4) pp(b5,7.5, 0, 0,0,-Math.sin(tt)/1.6,0,1);      
+     b3.add(b5); 
+ if(Math.sin(tt)/2>-0.4) pp(b6,-7.5, 0, 0,0,-Math.sin(tt)/1.6,0,1);      
+     b3.add(b6)
+
+if(Math.sin(tt)/1.6<0 && b13.position.x>-4 ){
+b13.position.x-=0.04;b14.position.x-=0.04;}
+else{  b13.position.x+=0.04;b14.position.x+=0.04;}
+b7.add(b13); b6.add(b14);
+       
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        
+        animate();
+        
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
